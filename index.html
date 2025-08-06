@@ -1,0 +1,510 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <link rel="shortcut icon" type="image/x-icon" href="favicon.ico" />
+  <title>WebRTC 聊天室</title>
+  <style>
+    * {
+      box-sizing: border-box;
+    }
+
+    body {
+      font-family: Arial, Helvetica, sans-serif;
+    }
+
+    #canvas {
+      /* The Godot canvas itself */
+      width: 100%;
+      height: 100%;
+      display: block;
+      /* Remove extra space below canvas */
+    }
+
+    /* Style the header */
+
+    header {
+      background-color: #666;
+      padding: 1px;
+      text-align: center;
+      font-size: 10px;
+      color: white;
+    }
+
+    /* Create two columns/boxes that floats next to each other */
+    nav {
+      float: left;
+      width: 80%;
+      /* height: 300px;  only for demonstration, should be removed */
+      background: #ccc;
+      padding: 5px;
+      overflow-y: auto;
+    }
+
+    /* Style the list inside the menu */
+    nav ul {
+      list-style-type: none;
+      padding: 0;
+    }
+
+    article {
+      float: left;
+      padding: 5px;
+      width: 20%;
+      background-color: #f1f1f1;
+      /*height: 300px;  only for demonstration, should be removed */
+      overflow-y: scroll;
+    }
+
+    /* Clear floats after the columns */
+    section::after {
+      content: "";
+      display: table;
+      clear: both;
+    }
+
+    /* Style the footer */
+    footer {
+      background-color: #777;
+      padding: 10px;
+      text-align: center;
+      color: white;
+    }
+
+    #status {
+      margin: 20px 0;
+      padding: 10px;
+      border-radius: 4px;
+    }
+
+    .connected {
+      background-color: #dff0d8;
+    }
+
+    .disconnected {
+      background-color: #f2dede;
+    }
+
+    #msgLog {
+      height: 200px;
+      overflow-y: scroll;
+      border: 1px solid #ddd;
+      padding: 10px;
+      margin-top: 20px;
+    }
+
+    /* Responsive layout - makes the two columns/boxes stack on top of each other instead of next to each other, on small screens */
+    @media (max-width: 600px) {
+
+      nav,
+      article {
+        width: 100%;
+        height: auto;
+      }
+    }
+
+    #remoteVideos {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      padding: 3px;
+    }
+
+    video {
+      width: 95%;
+      border-radius: 1px;
+      padding: 3px;
+      background: rgba(255, 255, 255, 0);
+    }
+  </style>
+</head>
+
+<body>
+
+  <section>
+    <nav>
+      <canvas id="canvas" width="512" height="400"></canvas>
+    </nav>
+    <article>
+      
+          <div id="remoteVideos"></div>
+          <video id="localVideo" autoplay muted playsinline></video>
+      
+    </article>
+  </section>
+  <footer>
+    <div id="controls">
+      <div>
+        <button id="selectColor">顏色
+        <div id="selectedColor" style="width: 30px; height: 15px; border: 1px solid #000; margin-left: 8px;"></div>
+        </button>
+        <button id="generateRoom">🚪 產生號碼</button>
+        <input type="text" id="room-id-input" placeholder="輸入房間號碼..." />
+        <button id="joinBtn">🚪 加入房間</button>
+      </div>
+      <button id="toggleAudioBtn">🎤 關閉音訊</button>
+      <button id="toggleVideoBtn">📷 關閉視訊</button>
+      <button id="switchCameraBtn">切換相機</button>
+      <button id="leaveRoom">🚪 離開</button>
+    </div>
+    
+    <div id="msg-section">
+      <input type="text" id="msgInput" placeholder="輸入..." />
+      <button id="sendMsgBtn">傳送</button>
+      <div id="msgLog"></div>
+    </div>
+  </footer>
+
+
+
+
+  <script type="module">
+    import { joinRoom, selfId } from 'https://esm.run/trystero'
+    //import { selfId } from 'https://esm.run/trystero'
+
+    function randomAscii6() {
+      const chars = "ABCDEFGHIJKLMNOPQRSTUVWXYZ";
+      let result = "";
+      for (let i = 0; i < 6; i++) {
+        result += chars[Math.floor(Math.random() * chars.length)];
+      }
+      return result;
+    }
+
+    let room;
+    var roomId = null;
+    let sendMsg, getMsg;
+    let selfStream;
+    let audioEnabled = true;
+    let videoEnabled = true;
+    let currentFacingMode = "user"; // 前置或後置相機
+    const peerAudios = {};
+    const peerVideos = {};
+
+    const localVideo = document.getElementById("localVideo");
+    const toggleAudioBtn = document.getElementById("toggleAudioBtn");
+    const remoteVideo = document.getElementById("remoteVideos");
+    const toggleVideoBtn = document.getElementById("toggleVideoBtn");
+    const switchCameraBtn = document.getElementById("switchCameraBtn");
+    const audioStatus = document.getElementById("audioStatus");
+    const videoStatus = document.getElementById("videoStatus");
+    const selectColorBtn = document.getElementById('selectColor');
+    const join = document.getElementById("joinBtn");
+    const roomIdInput = document.getElementById("room-id-input");
+    const controlsDiv = document.getElementById("controls");
+    const msgInput = document.getElementById("msgInput");
+    const sendMsgBtn = document.getElementById("sendMsgBtn");
+    const msgLog = document.getElementById("msgLog");
+
+    // 按鈕事件監聽
+    toggleAudioBtn.addEventListener("click", toggleAudio);
+    toggleVideoBtn.addEventListener("click", toggleVideo);
+    switchCameraBtn.addEventListener("click", switchCamera);
+    selectColorBtn.addEventListener('click', colorSelection);
+    // 初始化顏色選擇
+    colorSelection();
+
+    // 選擇顏色
+    function colorSelection() {
+      const colors = ['red', 'green', 'blue', 'yellow', 'pink'];
+      const randomColor = colors[Math.floor(Math.random() * colors.length)];
+      selectedColor.style.backgroundColor = randomColor;
+    }
+
+    generateRoom.onclick = () => {
+      roomId = randomAscii6();
+      roomIdInput.value = roomId;
+    };
+
+    // 初始化媒體串流
+    async function initMediaStream() {
+      try {
+        const constraints = {
+          audio: true,
+          video: {
+            facingMode: currentFacingMode,
+          },
+        };
+
+        selfStream = await navigator.mediaDevices.getUserMedia(constraints);
+        localVideo.srcObject = selfStream;
+        toggleVideo(); // 預設停止視訊
+        // 更新狀態顯示
+        updateStatusDisplay();
+
+        console.log("媒體串流已取得");
+      } catch (error) {
+        console.error("取得媒體串流失敗:", error);
+      }
+    }
+
+    // 切換音訊狀態
+    async function toggleAudio() {
+      audioEnabled = !audioEnabled;
+
+      if (selfStream) {
+        const audioTracks = selfStream.getAudioTracks();
+        audioTracks.forEach((track) => {
+          track.enabled = audioEnabled;
+        });
+      }
+      updateStatusDisplay();
+    }
+
+    // 切換視訊狀態
+    async function toggleVideo() {
+      videoEnabled = !videoEnabled;
+
+      if (selfStream) {
+        const videoTracks = selfStream.getVideoTracks();
+        videoTracks.forEach((track) => {
+          track.enabled = videoEnabled;
+        });
+      }
+      updateStatusDisplay();
+    }
+
+    // 切換相機
+    async function switchCamera() {
+      currentFacingMode =
+        currentFacingMode === "user" ? "environment" : "user";
+      await updateMediaStream();
+    }
+
+    // 更新媒體串流（重新取得）
+    async function updateMediaStream() {
+      if (selfStream) {
+        // 停止所有舊的軌道
+        selfStream.getTracks().forEach((track) => track.stop());
+      }
+
+      try {
+        const constraints = {
+          audio: audioEnabled,
+          video: videoEnabled
+            ? {
+              facingMode: currentFacingMode,
+            }
+            : false,
+        };
+
+        selfStream = await navigator.mediaDevices.getUserMedia(constraints);
+        localVideo.srcObject = selfStream;
+
+        // 如果有房間連接，更新串流
+        if (room) {
+          room.replaceSelfStream(selfStream);
+        }
+
+        updateStatusDisplay();
+      } catch (error) {
+        console.error("更新媒體串流失敗:", error);
+      }
+    }
+
+    // 更新狀態顯示
+    function updateStatusDisplay() {
+      // 音訊狀態
+      const isAudioActive =
+        selfStream &&
+        selfStream
+          .getAudioTracks()
+          .some((track) => track.readyState === "live" && track.enabled);
+      toggleAudioBtn.textContent = isAudioActive ? "關閉音訊" : "開啟音訊";
+
+      // 視訊狀態
+      const isVideoActive =
+        selfStream &&
+        selfStream
+          .getVideoTracks()
+          .some((track) => track.readyState === "live" && track.enabled);
+      toggleVideoBtn.textContent = isVideoActive ? "關閉視訊" : "開啟視訊";
+    }
+
+    join.onclick = () => {
+      if (!roomIdInput.value) {
+        alert("請輸入房間ID");
+        return;
+      }
+      join.disabled = true;
+      roomIdInput.disabled = true;
+      try {
+        const config = { appId: "godot-video-app" };
+        room = joinRoom(config, roomIdInput.value.trim());
+        toGodot(JSON.stringify({
+          peerid: selfId,
+          type: "selfId",
+          data: { color: selectedColor.style.backgroundColor },
+        }));
+
+        // 建立 msg 動作
+        [sendMsg, getMsg] = room.makeAction("msg");
+        // 設置接收訊息的處理函數
+        getMsg((msg) => {
+          if (msg.type == "msg") {
+          const timestamp = new Date().toLocaleTimeString();
+          const logEntry = document.createElement("div");
+          logEntry.textContent = `[${timestamp}] 收到: ${msg.type} - ${msg.peerid} - ${msg.data}`;
+          msgLog.prepend(logEntry);
+          }
+          // 將訊息傳遞給 Godot
+          toGodot(JSON.stringify(msg));
+        });
+
+        room.onPeerLeave((peerId) => {
+          logMessage(`同伴離開: ${peerId}`);
+          updateStatus();
+          delete peerAudios.peerId;
+          delete peerVideos.peerId;
+          let peerDiv = document.getElementById(peerId);
+          if (peerDiv) {
+            peerDiv.remove(); // Removes the div element from the DOM
+          }
+        });
+        // 更新UI
+        controlsDiv.style.display = "block";
+
+        logMessage("已成功加入房間，可以開始傳送了！");
+      } catch (error) {
+        console.error("連接失敗:", error);
+
+        startBtn.disabled = false;
+        roomIdInput.disabled = false;
+      }
+
+      // get a local video,audio stream from the microphone
+      localVideo.srcObject = selfStream;
+
+      // send stream to peers currently in the room
+      room.addStream(selfStream);
+
+      // send stream to peers who join later
+      room.onPeerJoin((peerId) => {
+        logMessage(`同伴加入: ${peerId}`);
+        updateStatus();
+        room.addStream(selfStream, peerId);
+        // 發送自我ID給其他peers
+        sendMsg({
+            "peerid": selfId,
+            "type": "join",
+            "data": { "color": selectedColor.style.backgroundColor },
+          });
+      });
+
+      // handle streams from other peers
+      room.onPeerStream((stream, peerId) => {
+        const audio = new Audio();
+        audio.srcObject = stream;
+        audio.autoplay = true;
+        peerAudios[peerId] = audio;
+
+        let video = peerVideos[peerId];
+        if (!video) {
+          video = document.createElement("video");
+          video.setAttribute("id", peerId);
+          // iOS 手機使用時，必須增加的屬性
+          video.setAttribute("autoplay", "");
+          video.setAttribute("muted", "");
+          video.setAttribute("playsinline", "");
+          remoteVideo.appendChild(video);
+        }
+        video.srcObject = stream;
+        peerVideos[peerId] = video;
+      });
+    };
+    // 發送按鈕點擊事件
+    sendMsgBtn.addEventListener("click", () => {
+      const msg = msgInput.value.trim();
+      if (!msg) {
+        alert("請輸入訊息");
+        return;
+      }
+
+      // 發送訊息給所有同伴
+      sendMsg({
+        "peerid": selfId,
+        "type": "msg",
+        "data":  msg ,
+      });
+
+
+      // 記錄到本地日誌
+      const timestamp = new Date().toLocaleTimeString();
+      const logEntry = document.createElement("div");
+      logEntry.textContent = `[${timestamp}] 你送出了: ${msg}`;
+      msgLog.prepend(logEntry);
+      // 清空輸入框
+      msgInput.value = "";
+    });
+    // 更新狀態顯示
+    function updateStatus() {
+      const peers = room.getPeers();
+    }
+
+    // 記錄消息到日誌
+    function logMessage(message) {
+      const timestamp = new Date().toLocaleTimeString();
+      const logEntry = document.createElement("div");
+      logEntry.textContent = `[${timestamp}] ${message}`;
+      msgLog.prepend(logEntry);
+    }
+    
+    
+    // 初始化
+    initMediaStream();
+
+
+    var toGodot = null;
+
+    window.JSGD = {
+      // Godot發送訊息到 JavaScript
+      gdSend: function (gdMsg) {
+        sendMsg(JSON.parse(gdMsg));
+        console.log("sendMsg is ", JSON.parse(gdMsg));
+      },
+      toPeers: function (data) {
+            //console.log("Received from Godot:", data," Current connections:", Array.from(connections.keys()));
+            sendMsg(JSON.parse(data));
+        },
+      // 設置 Godot 回調函數
+      gdcb: function (gdCbFunc) {
+        if (typeof gdCbFunc === "function") {
+          toGodot = gdCbFunc;
+          // 測試回調
+          toGodot(JSON.stringify({
+            peerid: selfId,
+            type: "selfId",
+            data: { color: selectedColor.style.backgroundColor },
+          }));
+          //console.log("Godot callback function ready to use");
+        } else {
+          console.log("Godot callback function must be a function");
+        }
+      },
+    };
+  </script>
+  <script src="index.js"></script>
+  <script>
+    // Godot Engine 初始化
+    const GODOT_THREADS_ENABLED = false;
+    var engine = new Engine({"args":[],"canvasResizePolicy":2,"executable":"index","experimentalVK":false,"fileSizes":{"index.pck":16598352,"index.wasm":25590391},"focusCanvas":true,"gdnativeLibs":[]});
+    engine.startGame({
+      /* optional override configuration, eg. */
+      //args:[],
+      //unloadAfterInit: false,
+      focusCanvas: true,
+      gdextensionLibs: [],
+      ensureCrossOriginIsolationHeaders: true,
+      canvasResizePolicy: 0,
+    });
+
+  </script>
+
+
+
+</body>
+
+</html>
