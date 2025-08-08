@@ -39,6 +39,7 @@
       width: 80%;
       /* height: 300px;  only for demonstration, should be removed */
       background: #ccc;
+      background-image: url("gdrtc.png");
       padding: 5px;
       overflow-y: auto;
     }
@@ -126,6 +127,7 @@
 			color: #e0e0e0;
 			background-color: #3b3943;
 			background-image: linear-gradient(to bottom, #403e48, #35333c);
+     
 			border: 1px solid #45434e;
 			box-shadow: 0 0 1px 1px #2f2d35;
 		}
@@ -211,9 +213,11 @@
   <section>
     <nav>
       <canvas id="canvas" width="512" height="400"></canvas>
-      <div id='status'>
+    <div id='status'>
+      
 		<div id='status-progress' style='display: none;' oncontextmenu='event.preventDefault();'><div id ='status-progress-inner'></div></div>
-		<div id='status-indeterminate' style='display: none;' oncontextmenu='event.preventDefault();'>
+		
+    <div id='status-indeterminate' style='display: none;' oncontextmenu='event.preventDefault();'>
 			<div></div>
 			<div></div>
 			<div></div>
@@ -588,7 +592,7 @@
   <script type='text/javascript'>//<![CDATA[
     // Godot Engine 初始化
     const GODOT_THREADS_ENABLED = false;
-    var engine = new Engine({"args":[],"canvasResizePolicy":2,"executable":"index","experimentalVK":false,"fileSizes":{"index.pck":16598352,"index.wasm":25590391},"focusCanvas":true,"gdnativeLibs":[]});
+    var engine = new Engine({"args":[],"canvasResizePolicy":2,"executable":"index","experimentalVK":false,"fileSizes":{"index.pck":27311024,"index.wasm":25590391},"focusCanvas":true,"gdnativeLibs":[]});
 
 		(function() {
 			const INDETERMINATE_STATUS_STEP_MS = 100;
